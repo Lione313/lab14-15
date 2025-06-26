@@ -1,8 +1,10 @@
-import 'dart:io';
-
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+
+import 'dart:io' as io show File; 
 
 import '../../viewmodels/products_view_model.dart';
 
@@ -19,15 +21,23 @@ class _AddProductViewState extends State<AddProductView> {
   final _descripcionController = TextEditingController();
   final _precioController = TextEditingController();
   DateTime? _fechaVencimiento;
-  File? _imageFile;
+
+  io.File? _imageFile; // Solo para móviles y desktop
+  Uint8List? _webImageBytes; // Solo para web
+
+  XFile? _pickedFile; // Común para ambos
 
   Future<void> _pickImage() async {
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: ImageSource.gallery);
     if (picked != null) {
-      setState(() {
-        _imageFile = File(picked.path);
-      });
+      _pickedFile = picked;
+      if (kIsWeb) {
+        final bytes = await picked.readAsBytes();
+        setState(() => _webImageBytes = bytes);
+      } else {
+        setState(() => _imageFile = io.File(picked.path));
+      }
     }
   }
 
@@ -40,27 +50,38 @@ class _AddProductViewState extends State<AddProductView> {
       lastDate: DateTime(now.year + 5),
     );
     if (picked != null) {
-      setState(() {
-        _fechaVencimiento = picked;
-      });
+      setState(() => _fechaVencimiento = picked);
     }
   }
 
   void _saveProduct() async {
-    if (_formKey.currentState!.validate() && _fechaVencimiento != null) {
-      final viewModel = Provider.of<ProductsViewModel>(context, listen: false);
+  if (_formKey.currentState!.validate() && _fechaVencimiento != null) {
+    // Verificar si hay imagen (web o móvil)
+    final tieneImagen = (!kIsWeb && _imageFile != null) || (kIsWeb && _webImageBytes != null);
 
-      await viewModel.addProducto(
-        nombre: _nombreController.text.trim(),
-        descripcion: _descripcionController.text.trim(),
-        fechaVencimiento: _fechaVencimiento!,
-        precio: double.parse(_precioController.text),
-        imageFile: _imageFile,
+    if (!tieneImagen) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Debe seleccionar una imagen para el producto.')),
       );
-
-      if (mounted) Navigator.pop(context);
+      return;
     }
+
+    final viewModel = Provider.of<ProductsViewModel>(context, listen: false);
+
+    await viewModel.addProducto(
+      nombre: _nombreController.text.trim(),
+      descripcion: _descripcionController.text.trim(),
+      fechaVencimiento: _fechaVencimiento!,
+      precio: double.parse(_precioController.text),
+      imageFile: kIsWeb ? null : _imageFile,
+      webImageBytes: kIsWeb ? _webImageBytes : null,
+      webFileName: kIsWeb && _pickedFile != null ? _pickedFile!.name : null,
+    );
+
+    if (mounted) Navigator.pop(context);
   }
+}
+
 
   @override
   void dispose() {
@@ -72,6 +93,15 @@ class _AddProductViewState extends State<AddProductView> {
 
   @override
   Widget build(BuildContext context) {
+    Widget imagePreview;
+    if (kIsWeb && _webImageBytes != null) {
+      imagePreview = Image.memory(_webImageBytes!, height: 150);
+    } else if (_imageFile != null) {
+      imagePreview = Image.file(_imageFile!, height: 150);
+    } else {
+      imagePreview = const Text('No se seleccionó imagen');
+    }
+
     return Scaffold(
       appBar: AppBar(title: const Text('Agregar Producto')),
       body: Padding(
@@ -83,21 +113,18 @@ class _AddProductViewState extends State<AddProductView> {
               TextFormField(
                 controller: _nombreController,
                 decoration: const InputDecoration(labelText: 'Nombre'),
-                validator: (value) =>
-                    value!.isEmpty ? 'Ingrese el nombre' : null,
+                validator: (value) => value!.isEmpty ? 'Ingrese el nombre' : null,
               ),
               TextFormField(
                 controller: _descripcionController,
                 decoration: const InputDecoration(labelText: 'Descripción'),
-                validator: (value) =>
-                    value!.isEmpty ? 'Ingrese una descripción' : null,
+                validator: (value) => value!.isEmpty ? 'Ingrese una descripción' : null,
               ),
               TextFormField(
                 controller: _precioController,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(labelText: 'Precio'),
-                validator: (value) =>
-                    value!.isEmpty ? 'Ingrese el precio' : null,
+                validator: (value) => value!.isEmpty ? 'Ingrese el precio' : null,
               ),
               const SizedBox(height: 12),
               Row(
@@ -114,9 +141,7 @@ class _AddProductViewState extends State<AddProductView> {
                 ],
               ),
               const SizedBox(height: 12),
-              _imageFile != null
-                  ? Image.file(_imageFile!, height: 150)
-                  : const Text('No se seleccionó imagen'),
+              imagePreview,
               TextButton.icon(
                 onPressed: _pickImage,
                 icon: const Icon(Icons.image),

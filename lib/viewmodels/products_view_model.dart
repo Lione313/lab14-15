@@ -1,4 +1,6 @@
-import 'dart:io';
+import 'dart:typed_data';
+import 'dart:io' as io;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../models/product_model.dart';
 import '../services/database_service.dart';
@@ -15,7 +17,6 @@ class ProductsViewModel extends ChangeNotifier {
   bool _isLoading = false;
   bool get isLoading => _isLoading;
 
-  // Cargar productos desde la base de datos
   Future<void> fetchProductos() async {
     _isLoading = true;
     notifyListeners();
@@ -26,29 +27,32 @@ class ProductsViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Agregar un producto nuevo
   Future<void> addProducto({
     required String nombre,
     required String descripcion,
     required DateTime fechaVencimiento,
     required double precio,
-    required File? imageFile,
+    io.File? imageFile,
+    Uint8List? webImageBytes,
+    String? webFileName,
   }) async {
     _isLoading = true;
     notifyListeners();
 
     String imageUrl = '';
 
-    // Subir imagen si existe
-    if (imageFile != null) {
-      final uploadedUrl = await _cloudService.uploadImage(imageFile);
-      if (uploadedUrl != null) {
-        imageUrl = uploadedUrl;
-      }
+    final uploadedUrl = await _cloudService.uploadImage(
+      imageFile: imageFile,
+      webImageBytes: webImageBytes,
+      fileName: webFileName,
+    );
+
+    if (uploadedUrl != null) {
+      imageUrl = uploadedUrl;
     }
 
     final newProduct = ProductModel(
-      id: const Uuid().v4(), // genera ID único
+      id: const Uuid().v4(),
       nombre: nombre,
       descripcion: descripcion,
       fechaVencimiento: fechaVencimiento,
@@ -63,14 +67,12 @@ class ProductsViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Eliminar producto
   Future<void> deleteProducto(String id) async {
     await _dbService.deleteProducto(id);
     _productos.removeWhere((p) => p.id == id);
     notifyListeners();
   }
 
-  // Editar producto (opcional si haces pantalla de editar)
   Future<void> updateProducto(ProductModel producto) async {
     await _dbService.updateProducto(producto);
     int index = _productos.indexWhere((p) => p.id == producto.id);

@@ -1,64 +1,58 @@
-import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/product_model.dart';
 
-class DatabaseService {
+abstract class BaseDatabaseService {
+  Future<void> insertProducto(ProductModel producto);
+  Future<List<ProductModel>> getProductos();
+  Future<void> deleteProducto(String id);
+  Future<void> updateProducto(ProductModel producto);
+}
+
+class DatabaseService extends BaseDatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
   factory DatabaseService() => _instance;
   DatabaseService._internal();
 
-  static Database? _db;
+  final String _key = 'productos_list';
 
-  Future<Database> get database async {
-    if (_db != null) return _db!;
-    _db = await _initDB();
-    return _db!;
-  }
+  Future<SharedPreferences> get _prefs async => await SharedPreferences.getInstance();
 
-  Future<Database> _initDB() async {
-    final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'productos.db');
-
-    return await openDatabase(
-      path,
-      version: 1,
-      onCreate: _onCreate,
-    );
-  }
-
-  Future<void> _onCreate(Database db, int version) async {
-    await db.execute('''
-      CREATE TABLE productos(
-        id TEXT PRIMARY KEY,
-        nombre TEXT,
-        descripcion TEXT,
-        fechaVencimiento TEXT,
-        precio REAL,
-        backgroundImg TEXT
-      )
-    ''');
-  }
-
+  @override
   Future<void> insertProducto(ProductModel producto) async {
-    final db = await database;
-    await db.insert('productos', producto.toJson(),
-        conflictAlgorithm: ConflictAlgorithm.replace);
+    final prefs = await _prefs;
+    final productos = await getProductos();
+    productos.removeWhere((p) => p.id == producto.id); // evita duplicados
+    productos.add(producto);
+    await prefs.setString(_key, jsonEncode(productos.map((e) => e.toJson()).toList()));
   }
 
+  @override
   Future<List<ProductModel>> getProductos() async {
-    final db = await database;
-    final res = await db.query('productos');
-    return res.map((e) => ProductModel.fromJson(e)).toList();
+    final prefs = await _prefs;
+    final data = prefs.getString(_key);
+    if (data == null) return [];
+    final decoded = jsonDecode(data) as List<dynamic>;
+    return decoded.map((e) => ProductModel.fromJson(e)).toList();
   }
 
+  @override
   Future<void> deleteProducto(String id) async {
-    final db = await database;
-    await db.delete('productos', where: 'id = ?', whereArgs: [id]);
+    final prefs = await _prefs;
+    final productos = await getProductos();
+    productos.removeWhere((p) => p.id == id);
+    await prefs.setString(_key, jsonEncode(productos.map((e) => e.toJson()).toList()));
   }
 
+  @override
   Future<void> updateProducto(ProductModel producto) async {
-    final db = await database;
-    await db.update('productos', producto.toJson(),
-        where: 'id = ?', whereArgs: [producto.id]);
+    final prefs = await _prefs;
+    final productos = await getProductos();
+    final index = productos.indexWhere((p) => p.id == producto.id);
+    if (index != -1) {
+      productos[index] = producto;
+      await prefs.setString(_key, jsonEncode(productos.map((e) => e.toJson()).toList()));
+    }
   }
 }

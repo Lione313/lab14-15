@@ -8,6 +8,7 @@ abstract class BaseDatabaseService {
   Future<List<ProductModel>> getProductos();
   Future<void> deleteProducto(String id);
   Future<void> updateProducto(ProductModel producto);
+  Future<void> getProductoById(String id);
 }
 
 class DatabaseService extends BaseDatabaseService {
@@ -54,5 +55,12 @@ class DatabaseService extends BaseDatabaseService {
       productos[index] = producto;
       await prefs.setString(_key, jsonEncode(productos.map((e) => e.toJson()).toList()));
     }
+  }
+
+  @override
+  Future<ProductModel?> getProductoById(String id) async {
+    final productos = await getProductos();
+    final producto = productos.where((p) => p.id == id).toList();
+    return producto.isNotEmpty ? producto.first : null;
   }
 }

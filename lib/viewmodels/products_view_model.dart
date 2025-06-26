@@ -1,11 +1,10 @@
 import 'dart:typed_data';
 import 'dart:io' as io;
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:uuid/uuid.dart';
 import '../models/product_model.dart';
 import '../services/database_service.dart';
 import '../services/cloudinary_service.dart';
-import 'package:uuid/uuid.dart';
 
 class ProductsViewModel extends ChangeNotifier {
   final _dbService = DatabaseService();
@@ -80,5 +79,9 @@ class ProductsViewModel extends ChangeNotifier {
       _productos[index] = producto;
       notifyListeners();
     }
+  }
+
+  Future<ProductModel?> getProductoById(String id) async {
+    return await _dbService.getProductoById(id);
   }
 }

@@ -1,31 +1,67 @@
 import 'dart:typed_data';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'dart:io' as io show File;
 
+import '../../models/product_model.dart';
+import '../../services/cloudinary_service.dart';
 import '../../viewmodels/products_view_model.dart';
 
-class AddProductView extends StatefulWidget {
-  const AddProductView({super.key});
+class EditProductView extends StatefulWidget {
+  final ProductModel producto;
+
+  const EditProductView({super.key, required this.producto});
 
   @override
-  State<AddProductView> createState() => _AddProductViewState();
+  State<EditProductView> createState() => _EditProductViewState();
 }
 
-class _AddProductViewState extends State<AddProductView> {
+class _EditProductViewState extends State<EditProductView> {
   final _formKey = GlobalKey<FormState>();
-  final _nombreController = TextEditingController();
-  final _descripcionController = TextEditingController();
-  final _precioController = TextEditingController();
-  DateTime? _fechaVencimiento;
+  late TextEditingController _nombreController;
+  late TextEditingController _descripcionController;
+  late TextEditingController _precioController;
+  late DateTime _fechaVencimiento;
 
   io.File? _imageFile;
   Uint8List? _webImageBytes;
   XFile? _pickedFile;
 
-  bool _isSaving = false; // ✅ Evitar duplicados
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nombreController = TextEditingController(text: widget.producto.nombre);
+    _descripcionController = TextEditingController(text: widget.producto.descripcion);
+    _precioController = TextEditingController(text: widget.producto.precio.toString());
+    _fechaVencimiento = widget.producto.fechaVencimiento;
+  }
+
+  @override
+  void dispose() {
+    _nombreController.dispose();
+    _descripcionController.dispose();
+    _precioController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _selectDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _fechaVencimiento,
+      firstDate: DateTime.now(),
+      lastDate: DateTime(DateTime.now().year + 5),
+    );
+
+    if (picked != null) {
+      setState(() {
+        _fechaVencimiento = picked;
+      });
+    }
+  }
 
   Future<void> _pickImage() async {
     final picker = ImagePicker();
@@ -41,48 +77,36 @@ class _AddProductViewState extends State<AddProductView> {
     }
   }
 
-  Future<void> _selectDate() async {
-    final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: now,
-      firstDate: now,
-      lastDate: DateTime(now.year + 5),
-    );
-    if (picked != null) {
-      setState(() => _fechaVencimiento = picked);
-    }
-  }
-
-  void _saveProduct() async {
+  Future<void> _saveChanges() async {
     if (_isSaving) return;
-    if (_formKey.currentState!.validate() && _fechaVencimiento != null) {
-      final tieneImagen =
-          (!kIsWeb && _imageFile != null) || (kIsWeb && _webImageBytes != null);
 
-      if (!tieneImagen) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Debe seleccionar una imagen para el producto.'),
-          ),
-        );
-        return;
-      }
-
+    if (_formKey.currentState!.validate()) {
       setState(() => _isSaving = true);
 
-      final viewModel =
-          Provider.of<ProductsViewModel>(context, listen: false);
+      String? newImageUrl;
 
-      await viewModel.addProducto(
+      final cloudinary = CloudinaryService();
+
+      if (kIsWeb && _webImageBytes != null && _pickedFile != null) {
+        newImageUrl = await cloudinary.uploadImage(
+          webImageBytes: _webImageBytes,
+          fileName: _pickedFile!.name,
+        );
+      } else if (!kIsWeb && _imageFile != null) {
+        newImageUrl = await cloudinary.uploadImage(imageFile: _imageFile);
+      }
+
+      final updatedProduct = ProductModel(
+        id: widget.producto.id,
         nombre: _nombreController.text.trim(),
         descripcion: _descripcionController.text.trim(),
-        fechaVencimiento: _fechaVencimiento!,
+        fechaVencimiento: _fechaVencimiento,
         precio: double.parse(_precioController.text),
-        imageFile: kIsWeb ? null : _imageFile,
-        webImageBytes: kIsWeb ? _webImageBytes : null,
-        webFileName: kIsWeb && _pickedFile != null ? _pickedFile!.name : null,
+        backgroundImg: newImageUrl ?? widget.producto.backgroundImg,
       );
+
+      await Provider.of<ProductsViewModel>(context, listen: false)
+          .updateProducto(updatedProduct);
 
       if (mounted) {
         setState(() => _isSaving = false);
@@ -92,25 +116,24 @@ class _AddProductViewState extends State<AddProductView> {
   }
 
   @override
-  void dispose() {
-    _nombreController.dispose();
-    _descripcionController.dispose();
-    _precioController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     Widget imagePreview;
+
     if (kIsWeb && _webImageBytes != null) {
       imagePreview = ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: Image.memory(_webImageBytes!, height: 180, fit: BoxFit.cover),
       );
-    } else if (_imageFile != null) {
+    } else if (!kIsWeb && _imageFile != null) {
       imagePreview = ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: Image.file(_imageFile!, height: 180, fit: BoxFit.cover),
+      );
+    } else if (widget.producto.backgroundImg.isNotEmpty) {
+      imagePreview = ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.network(widget.producto.backgroundImg,
+            height: 180, fit: BoxFit.cover),
       );
     } else {
       imagePreview = Container(
@@ -119,14 +142,14 @@ class _AddProductViewState extends State<AddProductView> {
           color: Colors.grey[200],
           borderRadius: BorderRadius.circular(10),
         ),
-        child: const Center(child: Text('No se seleccionó imagen')),
+        child: const Center(child: Text('No hay imagen del producto')),
       );
     }
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F8F8),
       appBar: AppBar(
-        title: const Text('Nuevo Producto'),
+        title: const Text('Editar Producto'),
         backgroundColor: Colors.deepPurple,
         foregroundColor: Colors.white,
       ),
@@ -138,9 +161,8 @@ class _AddProductViewState extends State<AddProductView> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Detalles del producto',
-                style: TextStyle(
-                    fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87),
+                'Modificar información',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 20),
               TextFormField(
@@ -150,8 +172,7 @@ class _AddProductViewState extends State<AddProductView> {
                   prefixIcon: Icon(Icons.label),
                   border: OutlineInputBorder(),
                 ),
-                validator: (value) =>
-                    value!.isEmpty ? 'Ingrese el nombre' : null,
+                validator: (value) => value!.isEmpty ? 'Ingrese el nombre' : null,
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -173,33 +194,30 @@ class _AddProductViewState extends State<AddProductView> {
                   prefixIcon: Icon(Icons.attach_money),
                   border: OutlineInputBorder(),
                 ),
-                validator: (value) =>
-                    value!.isEmpty ? 'Ingrese el precio' : null,
+                validator: (value) => value!.isEmpty ? 'Ingrese el precio' : null,
               ),
               const SizedBox(height: 16),
               Row(
                 children: [
                   Expanded(
                     child: Text(
-                      _fechaVencimiento == null
-                          ? 'Seleccionar fecha de vencimiento'
-                          : 'Vence: ${_fechaVencimiento!.toLocal().toString().split(' ')[0]}',
+                      'Vence: ${_fechaVencimiento.toLocal().toString().split(' ')[0]}',
                       style: const TextStyle(fontSize: 16),
                     ),
                   ),
                   IconButton(
-                    onPressed: _selectDate,
                     icon: const Icon(Icons.calendar_today),
+                    onPressed: _selectDate,
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
               imagePreview,
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 onPressed: _pickImage,
                 icon: const Icon(Icons.image),
-                label: const Text('Seleccionar Imagen'),
+                label: const Text('Cambiar imagen'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.deepPurple,
                   side: const BorderSide(color: Colors.deepPurple),
@@ -220,7 +238,7 @@ class _AddProductViewState extends State<AddProductView> {
                         )
                       : const Icon(Icons.save),
                   label: Text(
-                    _isSaving ? 'Guardando...' : 'Guardar Producto',
+                    _isSaving ? 'Guardando...' : 'Guardar Cambios',
                     style: const TextStyle(fontSize: 16),
                   ),
                   style: ElevatedButton.styleFrom(
@@ -230,7 +248,7 @@ class _AddProductViewState extends State<AddProductView> {
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  onPressed: _isSaving ? null : _saveProduct,
+                  onPressed: _isSaving ? null : _saveChanges,
                 ),
               )
             ],
